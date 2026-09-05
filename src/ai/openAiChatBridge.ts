@@ -87,7 +87,7 @@ function logAiOutbound(requestBody: Record<string, unknown>): void {
  *
  * @param text 解析得到的助手正文。
  */
-function logAiInbound(text: string): void {
+function logAiInbound(text: string, elapsedMs?: number): void {
   const body = text === "" ? "(空正文)" : text;
   gameLog.info("[AI ←] " + body);
   if (text !== "") {
@@ -95,6 +95,42 @@ function logAiInbound(text: string): void {
     const tokensMax = estimateChineseTokensMaxByChars(n);
     gameLog.info("[AI ← 体量] " + n + " 字，粗估最多 " + tokensMax + " tokens");
   }
+  if (typeof elapsedMs === "number") {
+    gameLog.info("[AI ← 耗时] " + Math.round(elapsedMs / 1000) + "s");
+  }
+}
+
+/**
+ * 当上游返回 200 但正文为空时，把响应结构压缩成一行摘要打进日志：
+ * `finish_reason` 能区分 length(输出配额耗尽)/content_filter(内容过滤)/stop 等；
+ * `error`、`usage` 与 message 字段列表用于判断网关是否把错误伪装成了空成功。
+ *
+ * @param data 解析后的上游响应体；可能是 null(正文非 JSON)。
+ * @return 单行 JSON 摘要，超长自动截断。
+ */
+function summarizeUpstreamCompletion(data: unknown): string {
+  if (data == null) return "响应正文无法解析为 JSON（null）";
+  if (typeof data !== "object") return "响应正文非对象：" + String(data).slice(0, 200);
+  const d = data as Record<string, unknown>;
+  const frag: Record<string, unknown> = {};
+  const choices = Array.isArray(d.choices) ? d.choices : [];
+  const ch0 = choices.length > 0 && typeof choices[0] === "object" ? (choices[0] as Record<string, unknown>) : null;
+  if (ch0) {
+    frag.finish_reason = ch0.finish_reason;
+    const msg = ch0.message && typeof ch0.message === "object" ? (ch0.message as Record<string, unknown>) : null;
+    if (msg) {
+      frag.messageFields = Object.keys(msg);
+      frag.contentIsNull = msg.content == null;
+      if (typeof msg.reasoning_content === "string") {
+        frag.reasoningChars = (msg.reasoning_content as string).length;
+      }
+    }
+    if (typeof ch0.text !== "undefined") frag.legacyTextPresent = ch0.text != null;
+  }
+  if (d.error != null) frag.error = d.error;
+  if (d.usage != null) frag.usage = d.usage;
+  const json = JSON.stringify(frag);
+  return json.length > 900 ? json.slice(0, 900) + "…(已截断)" : json;
 }
 
 /**
@@ -331,18 +367,21 @@ export async function callChatCompletionNonStream(params: CallChatCompletionNonS
 
   logAiOutbound(requestBody);
   try {
+    const startedAt = Date.now();
     const data = await postChatCompletionsNonStream(url, headers, requestBody, {
       requestTimeoutMs: params.requestTimeoutMs,
       signal: params.signal,
     });
 
     const out = extractOpenAiNonStreamMessageText(data);
-    if (!out && data && typeof data === "object") {
-      console.warn(
-        "[OpenAI Bridge] 非流式响应中未解析到 choices[0].message.content / text，请对照上游 JSON。",
-      );
+    if (!out) {
+      // 空正文 = HTTP 2xx 但未取到任何文本。此时上游的 finish_reason / error /
+      // usage 是判断「截断 / 内容过滤 / 网关错误 / reasoning 吞掉预算」的唯一证据，
+      // 必须落盘到 gameLog，而不是只打 console。
+      gameLog.warn("[AI ← 空正文详情] " + summarizeUpstreamCompletion(data));
+      console.warn("[OpenAI Bridge] 非流式响应中未解析到 choices[0].message.content / text：", data);
     }
-    logAiInbound(out);
+    logAiInbound(out, Date.now() - startedAt);
     return out;
   } catch (e) {
     logAiFailure(e);

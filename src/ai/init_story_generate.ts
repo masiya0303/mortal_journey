@@ -1,6 +1,7 @@
 import { INIT_STORY_SYSTEM_PRESET } from "./init_story_preset";
 import { PRESET } from "./preset";
 import { completeChatWithMessagesJson, type JsonChatRequestPayload } from "./openAiChatBridge";
+import { gameLog } from "../log/gameLog";
 import { Protagonist } from "../role_core/Protagonist";
 import type { ProtagonistPlayInfo, NarrationPerson, TraitEntry } from "../role_core/types/playInfo";
 import { formatWorldLocationDash } from "../role_core/types/worldLocation";
@@ -127,6 +128,12 @@ export async function generateInitStory(input: InitStoryGenerateInput): Promise<
   const payload = buildInitStoryRequestPayload(input);
   let raw = await completeChatWithMessagesJson(payload);
   if (!hasCompleteStoryBody(raw)) {
+    const rawLen = raw == null ? 0 : raw.length;
+    gameLog.warn(
+      "[InitStory] 首次返回未含完整剧情标签（" +
+        (rawLen === 0 ? "上游返回空正文" : "疑似中途截断，仅 " + rawLen + " 字") +
+        "），自动重试一次。",
+    );
     raw = await completeChatWithMessagesJson(payload);
   }
   return { storyBody: extractInitStoryBody(raw) };

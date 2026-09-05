@@ -273,15 +273,19 @@ export async function generateInitState(input: InitStateGenerateInput): Promise<
 
   let raw = await completeChatWithMessagesJson(payload);
   if (!hasCompleteInitStateResponse(raw)) {
+    const rawLen = raw == null ? 0 : raw.length;
     gameLog.warn(
-      "[InitState] 首次返回缺少完整标签（疑似中途截断，仅 " +
-        String(raw == null ? 0 : raw.length) +
-        " 字），自动重试一次。",
+      "[InitState] 首次返回缺少完整标签（" +
+        (rawLen === 0 ? "上游返回空正文" : "疑似中途截断，仅 " + rawLen + " 字") +
+        "），自动重试一次。",
     );
     raw = await completeChatWithMessagesJson(payload);
     if (!hasCompleteInitStateResponse(raw)) {
+      const rawLen2 = raw == null ? 0 : raw.length;
       gameLog.warn(
-        "[InitState] 重试后仍不完整：将按已解析到的部分初始化，缺失项回落默认值。",
+        "[InitState] 重试后仍不完整（" +
+          (rawLen2 === 0 ? "上游再次返回空正文" : "仅 " + rawLen2 + " 字") +
+          "）：将按已解析到的部分初始化，缺失项回落默认值。",
       );
     }
   }
