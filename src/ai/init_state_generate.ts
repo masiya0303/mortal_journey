@@ -1,6 +1,7 @@
 import { INIT_STATE_SYSTEM_PRESET } from "./init_state_preset";
 import { extractTagContent, tryParseJsonArray, parseEquipObject, parseGongfaObject, parseStorageObject } from "./parseAiItem";
 import { completeChatWithMessagesJson, type JsonChatRequestPayload } from "./openAiChatBridge";
+import { gameLog } from "../log/gameLog";
 import {
   EQUIP_SLOT_COUNT,
   REALM_ORDER,
@@ -46,7 +47,9 @@ export interface InitStateParsed {
 }
 
 const DEFAULT_INIT_STATE_TEMPERATURE = 0.55;
-const DEFAULT_INIT_STATE_MAX_TOKENS = 16384;
+// 状态初始化含九段标签输出（含 NPC JSON），正常约 2~4k tokens；8192 已足够，
+// 过大的 max_tokens 不会加速生成，反而可能拖慢网关调度/加重超时风险。
+const DEFAULT_INIT_STATE_MAX_TOKENS = 8192;
 
 const MJ_WORLD_BODY_OPEN = "<mj_world_body>";
 const MJ_WORLD_BODY_CLOSE = "</mj_world_body>";
@@ -64,6 +67,27 @@ const TAG_STORY_SNAPSHOT_OPEN = "<mj_story_snapshot>";
 const TAG_STORY_SNAPSHOT_CLOSE = "</mj_story_snapshot>";
 const TAG_AGE_OPEN = "<mj_protagonist_age>";
 const TAG_AGE_CLOSE = "</mj_protagonist_age>";
+
+/**
+ * 输出契约要求的九个闭合标签。模型返回若在此之前的任意位置被截断，
+ * 后面的标签会整体缺失 —— 直接拿去解析只会得到一份"半空"的初始状态。
+ */
+const INIT_STATE_REQUIRED_CLOSE_TAGS: readonly string[] = [
+  TAG_AGE_CLOSE,
+  MJ_WORLD_BODY_CLOSE,
+  MJ_EQUIP_BODY_CLOSE,
+  MJ_MAGIC_BODY_CLOSE,
+  MJ_STORAGE_BODY_CLOSE,
+  TAG_USER_STATE_CLOSE,
+  TAG_NPC_NEARBY_CLOSE,
+  TAG_STORY_SNAPSHOT_CLOSE,
+  "</MJ_ACTION_OPTIONS_TAG>",
+];
+
+function hasCompleteInitStateResponse(raw: string): boolean {
+  const s = raw == null ? "" : String(raw);
+  return INIT_STATE_REQUIRED_CLOSE_TAGS.every((tag) => s.indexOf(tag) >= 0);
+}
 
 function safeJsonParse(text: string): unknown {
   try {
@@ -247,7 +271,20 @@ export async function generateInitState(input: InitStateGenerateInput): Promise<
     signal: input.signal,
   };
 
-  const raw = await completeChatWithMessagesJson(payload);
+  let raw = await completeChatWithMessagesJson(payload);
+  if (!hasCompleteInitStateResponse(raw)) {
+    gameLog.warn(
+      "[InitState] 首次返回缺少完整标签（疑似中途截断，仅 " +
+        String(raw == null ? 0 : raw.length) +
+        " 字），自动重试一次。",
+    );
+    raw = await completeChatWithMessagesJson(payload);
+    if (!hasCompleteInitStateResponse(raw)) {
+      gameLog.warn(
+        "[InitState] 重试后仍不完整：将按已解析到的部分初始化，缺失项回落默认值。",
+      );
+    }
+  }
   const r = input.protagonist.realm;
   return parseInitStateAiResponse(raw, r.major, r.minor, input.protagonist.linggen);
 }

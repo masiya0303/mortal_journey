@@ -26,7 +26,9 @@ export interface InitStoryParsed {
 }
 
 const DEFAULT_INIT_STORY_TEMPERATURE = 0.55;
-const DEFAULT_INIT_STORY_MAX_TOKENS = 65535;
+// 开局剧情正文（约600字）+ 思考段通常不足 3000 tokens；申请过大的输出预算
+// 不会加速生成，反而可能让网关按 max_tokens 预留资源/排队更久，故收敛到 8192。
+const DEFAULT_INIT_STORY_MAX_TOKENS = 8192;
 
 const MJ_STORY_BODY_OPEN = "<mj_story_body>";
 const MJ_STORY_BODY_CLOSE = "</mj_story_body>";
