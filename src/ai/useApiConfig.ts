@@ -114,7 +114,9 @@ export function useApiConfig(): UseApiConfigReturn {
         model: m,
         messages: [{ role: "user", content: "ping" }],
         temperature: 0,
-        max_tokens: 8,
+        // 注意：网关把 reasoning 计入 max_tokens 配额。max_tokens=8 时思考 8 tokens 即吃满，
+        // 正文必为空，每次测试都误报「空正文」。256 给思考留余量，正文能正常返回。
+        max_tokens: 256,
       });
       const ms = Date.now() - started;
       return "测试成功（" + (ms / 1000).toFixed(2) + "s）：" + (content || "已收到响应");

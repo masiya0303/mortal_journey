@@ -47,9 +47,10 @@ export interface InitStateParsed {
 }
 
 const DEFAULT_INIT_STATE_TEMPERATURE = 0.55;
-// 状态初始化含九段标签输出（含 NPC JSON），正常约 2~4k tokens；8192 已足够，
-// 过大的 max_tokens 不会加速生成，反而可能拖慢网关调度/加重超时风险。
-const DEFAULT_INIT_STATE_MAX_TOKENS = 8192;
+// 状态初始化含九段标签输出（含 NPC JSON），正常约 2~4k tokens。
+// 注意：网关把 reasoning 计入 max_tokens 配额（实测 reasoning_tokens 可吃掉整个预算致正文为空），
+// 故 16384 仅为给思考留余量的上限；正常请求靠 stop 收尾，耗时不变。
+const DEFAULT_INIT_STATE_MAX_TOKENS = 16384;
 
 const MJ_WORLD_BODY_OPEN = "<mj_world_body>";
 const MJ_WORLD_BODY_CLOSE = "</mj_world_body>";
